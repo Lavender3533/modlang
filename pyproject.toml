@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modlang"
+version = "0.1.0"
+description = "Lint, diff and auto-translate Minecraft mod language files (.json / legacy .lang), straight from a resources folder or a mod jar."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Lavender3533" }]
+requires-python = ">=3.9"
+keywords = ["minecraft", "mod", "forge", "fabric", "localization", "i18n", "translation", "lang"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment",
+    "Topic :: Software Development :: Localization",
+]
+
+[project.urls]
+Homepage = "https://github.com/Lavender3533/modlang"
+Issues = "https://github.com/Lavender3533/modlang/issues"
+
+[project.scripts]
+modlang = "modlang.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
