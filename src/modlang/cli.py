@@ -173,9 +173,14 @@ def cmd_translate(args: argparse.Namespace) -> int:
         source_file = langset.files[source_code]
         target_file = langset.files.get(args.lang)
         existing = target_file.entries if target_file else {}
-        todo = {k: v for k, v in source_file.entries.items() if k not in existing}
+        todo = {k: v for k, v in source_file.entries.items()
+                if k not in existing and k not in source_file.rich}
+        rich_skipped = sum(1 for k in source_file.rich if k not in existing)
 
         print(f"{bold(langset.namespace)}  {dim(langset.origin)}")
+        if rich_skipped:
+            print(f"  {yellow(f'{rich_skipped} rich-text key(s) skipped')} "
+                  f"{dim('(NeoForge text components must be translated by hand)')}")
         if not todo:
             print(f"  {green('nothing to translate')} - {args.lang} already has all "
                   f"{len(source_file.entries)} keys")
@@ -222,7 +227,9 @@ def cmd_translate(args: argparse.Namespace) -> int:
 
         out_path = (target_file.path if target_file and target_file.path
                     else source_file.path.with_name(args.lang + source_file.path.suffix))
-        out_path.write_text(dump_entries(merged, source_file.fmt), encoding="utf-8")
+        target_rich = target_file.rich if target_file else {}
+        out_path.write_text(dump_entries(merged, source_file.fmt, rich=target_rich),
+                            encoding="utf-8")
         print(f"  {green('wrote')} {out_path}  "
               f"(+{len(result.translated)} translated, {len(result.failed)} failed)")
         for key, reason in result.failed.items():

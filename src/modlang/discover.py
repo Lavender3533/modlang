@@ -20,6 +20,7 @@ class LangFile:
     origin: str          # human-readable location for messages
     entries: Dict[str, str]
     path: Optional[Path] = None  # writable location; None when inside a jar
+    rich: Dict[str, object] = field(default_factory=dict)  # NeoForge text components
 
 
 @dataclass
@@ -43,13 +44,13 @@ def _add_file(langset: LangSet, filename: str, data: bytes, origin: str,
               path: Optional[Path] = None) -> None:
     try:
         fmt = format_of(filename)
-        entries = parse_bytes(data, fmt, origin)
+        parsed = parse_bytes(data, fmt, origin)
     except LangParseError as exc:
         langset.parse_errors.append(str(exc))
         return
     langset.files[_normalize_code(filename)] = LangFile(
         code=_normalize_code(filename), fmt=fmt, origin=origin,
-        entries=entries, path=path,
+        entries=parsed.entries, path=path, rich=parsed.rich,
     )
 
 
