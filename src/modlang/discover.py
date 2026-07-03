@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import zipfile
 from dataclasses import dataclass, field
@@ -20,9 +21,15 @@ EXCLUDED_DIRS = {"build", "out", "bin", "run", "target",
                  "node_modules", "__pycache__"}
 
 
-def _is_excluded(root: Path, lang_dir: Path) -> bool:
-    parts = lang_dir.relative_to(root).parts
-    return any(part in EXCLUDED_DIRS or part.startswith(".") for part in parts)
+def _is_excluded(root: Path, lang_dir: Path, extra: List[str]) -> bool:
+    rel = lang_dir.relative_to(root)
+    if any(part in EXCLUDED_DIRS or part.startswith(".") for part in rel.parts):
+        return True
+    for pattern in extra:
+        if fnmatch.fnmatch(rel.as_posix(), pattern) \
+                or any(fnmatch.fnmatch(part, pattern) for part in rel.parts):
+            return True
+    return False
 
 
 @dataclass
@@ -82,10 +89,12 @@ def discover_jar(jar_path: Path) -> List[LangSet]:
     return [sets[ns] for ns in sorted(sets)]
 
 
-def discover_dir(root: Path) -> List[LangSet]:
+def discover_dir(root: Path, excludes: List[str] = None) -> List[LangSet]:
+    excludes = excludes or []
     sets: List[LangSet] = []
     lang_dirs = sorted(
-        (d for d in root.rglob("lang") if d.is_dir() and not _is_excluded(root, d)),
+        (d for d in root.rglob("lang")
+         if d.is_dir() and not _is_excluded(root, d, excludes)),
         key=lambda d: str(d),
     )
     # `root` itself may be a lang directory (e.g. `modlang check assets/mymod/lang`)
@@ -104,7 +113,7 @@ def discover_dir(root: Path) -> List[LangSet]:
     return sets
 
 
-def discover(path: Path) -> List[LangSet]:
+def discover(path: Path, excludes: List[str] = None) -> List[LangSet]:
     """Entry point: accepts a directory, a jar/zip, or a single lang file."""
     if path.is_file():
         if path.suffix.lower() in (".jar", ".zip"):
@@ -116,5 +125,5 @@ def discover(path: Path) -> List[LangSet]:
             return [langset]
         raise ValueError(f"unsupported file type: {path}")
     if path.is_dir():
-        return discover_dir(path)
+        return discover_dir(path, excludes)
     raise FileNotFoundError(path)

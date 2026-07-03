@@ -9,30 +9,18 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from . import __version__
+from . import __version__, ui
 from .checker import Report, compare
 from .discover import LangSet, discover
 from .parser import dump_entries
 from .translate import TranslateError, translate_entries
-
-_USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
-
-
-def _c(code: str, text: str) -> str:
-    return f"\033[{code}m{text}\033[0m" if _USE_COLOR else text
+from .ui import SYM, accent, bold, dim, err, ok, warn
 
 
-def red(t: str) -> str:    return _c("31", t)
-def green(t: str) -> str:  return _c("32", t)
-def yellow(t: str) -> str: return _c("33", t)
-def bold(t: str) -> str:   return _c("1", t)
-def dim(t: str) -> str:    return _c("2", t)
-
-
-def _load_sets(path_arg: str) -> List[LangSet]:
+def _load_sets(path_arg: str, excludes: Optional[List[str]] = None) -> List[LangSet]:
     path = Path(path_arg)
     try:
-        sets = discover(path)
+        sets = discover(path, excludes)
     except FileNotFoundError:
         sys.exit(f"error: path not found: {path}")
     except ValueError as exc:
@@ -44,22 +32,34 @@ def _load_sets(path_arg: str) -> List[LangSet]:
 
 
 def _pick_source(langset: LangSet, source_code: str) -> Optional[str]:
-    if source_code in langset.files:
-        return source_code
-    # legacy files were often named en_US.lang; codes are normalized lowercase already
-    return None
+    # codes are normalized lowercase, so en_US.lang is matched by "en_us" too
+    return source_code if source_code in langset.files else None
 
 
 # ---------------------------------------------------------------- list
 
 def cmd_list(args: argparse.Namespace) -> int:
-    for langset in _load_sets(args.path):
-        print(f"{bold(langset.namespace)}  {dim(langset.origin)}")
+    sets = _load_sets(args.path, args.exclude)
+    for index, langset in enumerate(sets):
+        if index:
+            print()
+        print(ui.header(langset.namespace, langset.origin))
+        source = langset.files.get(args.source)
         for code in langset.codes():
             file = langset.files[code]
-            print(f"  {code:<8} {file.fmt:<4} {len(file.entries):>5} keys")
+            if source is not None and code == args.source:
+                # pad before styling: ANSI codes would count toward the width
+                print(f"  {bold(f'{code:<8}')} {len(file.entries):>5} keys  "
+                      f"{dim('(source, ' + file.fmt + ')')}")
+            elif source is not None and source.entries:
+                covered = sum(1 for k in source.entries if k in file.entries)
+                fraction = covered / len(source.entries)
+                print(f"  {code:<8} {ui.coverage_bar(fraction)}  "
+                      f"{dim(f'{covered}/{len(source.entries)} · {file.fmt}')}")
+            else:
+                print(f"  {code:<8} {len(file.entries):>5} keys  {dim(file.fmt)}")
         for error in langset.parse_errors:
-            print(f"  {red('parse error:')} {error}")
+            print(f"  {err(SYM['err'] + ' parse error:')} {error}")
     return 0
 
 
@@ -68,16 +68,16 @@ def cmd_list(args: argparse.Namespace) -> int:
 def _print_report(code: str, report: Report, verbose: bool) -> None:
     parts = []
     if report.missing:
-        parts.append(red(f"{len(report.missing)} missing"))
+        parts.append(err(f"{SYM['err']} {len(report.missing)} missing"))
     if report.empty:
-        parts.append(red(f"{len(report.empty)} empty"))
+        parts.append(err(f"{SYM['err']} {len(report.empty)} empty"))
     if report.placeholder_mismatch:
-        parts.append(red(f"{len(report.placeholder_mismatch)} placeholder mismatch"))
+        parts.append(err(f"{SYM['err']} {len(report.placeholder_mismatch)} placeholder"))
     if report.untranslated:
-        parts.append(yellow(f"{len(report.untranslated)} untranslated"))
+        parts.append(warn(f"{SYM['warn']} {len(report.untranslated)} untranslated"))
     if report.extra:
-        parts.append(yellow(f"{len(report.extra)} extra"))
-    status = ", ".join(parts) if parts else green("ok")
+        parts.append(warn(f"{SYM['warn']} {len(report.extra)} extra"))
+    status = "  ".join(parts) if parts else ok(f"{SYM['ok']} ok")
     print(f"  {code:<8} {status}")
 
     def show(label: str, keys: List[str]) -> None:
@@ -85,38 +85,41 @@ def _print_report(code: str, report: Report, verbose: bool) -> None:
         for key in keys[:limit]:
             print(f"      {label} {key}")
         if limit is not None and len(keys) > limit:
-            print(dim(f"      ... {len(keys) - limit} more (use -v to show all)"))
+            print(dim(f"      {SYM['dot']} {len(keys) - limit} more (use -v to show all)"))
 
-    show(red("missing:"), report.missing)
-    show(red("empty:  "), report.empty)
+    show(err("missing      "), report.missing)
+    show(err("empty        "), report.empty)
     for key, src_ph, tgt_ph in report.placeholder_mismatch[: None if verbose else 5]:
-        print(f"      {red('placeholder:')} {key}  source={src_ph} target={tgt_ph}")
+        print(f"      {err('placeholder  ')} {key}  "
+              f"{dim('source=')}{src_ph} {dim('target=')}{tgt_ph}")
     if verbose:
-        show(yellow("same as source:"), report.untranslated)
-        show(yellow("extra:  "), report.extra)
+        show(warn("untranslated "), report.untranslated)
+        show(warn("extra        "), report.extra)
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    sets = _load_sets(args.path)
-    total_errors = total_warnings = 0
+    sets = _load_sets(args.path, args.exclude)
+    total_errors = total_warnings = languages_checked = 0
     json_out = []
 
-    for langset in sets:
+    for index, langset in enumerate(sets):
         source_code = _pick_source(langset, args.source)
         if not args.json:
-            print(f"{bold(langset.namespace)}  {dim(langset.origin)}")
+            if index:
+                print()
+            print(ui.header(langset.namespace, langset.origin))
         for error in langset.parse_errors:
             total_errors += 1
             if not args.json:
-                print(f"  {red('parse error:')} {error}")
+                print(f"  {err(SYM['err'] + ' parse error:')} {error}")
         if source_code is None:
             total_errors += 1
             if args.json:
                 json_out.append({"namespace": langset.namespace, "origin": langset.origin,
                                  "error": f"source language {args.source!r} not found"})
             else:
-                print(f"  {red('error:')} source language {args.source!r} not found "
-                      f"(available: {', '.join(langset.codes()) or 'none'})")
+                print(f"  {err(SYM['err'] + ' error:')} source language {args.source!r} "
+                      f"not found (available: {', '.join(langset.codes()) or 'none'})")
             continue
 
         targets = args.lang or [c for c in langset.codes() if c != source_code]
@@ -128,8 +131,9 @@ def cmd_check(args: argparse.Namespace) -> int:
                     json_out.append({"namespace": langset.namespace, "lang": code,
                                      "error": "file not found"})
                 else:
-                    print(f"  {code:<8} {red('file not found')}")
+                    print(f"  {code:<8} {err(SYM['err'] + ' file not found')}")
                 continue
+            languages_checked += 1
             report = compare(source_entries, langset.files[code].entries)
             total_errors += report.error_count
             total_warnings += report.warning_count
@@ -142,9 +146,18 @@ def cmd_check(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(json_out, ensure_ascii=False, indent=2))
     else:
-        summary = f"{total_errors} error(s), {total_warnings} warning(s)"
-        print(bold(red(summary) if total_errors else
-                   (yellow(summary) if total_warnings else green(summary))))
+        print()
+        print(ui.rule())
+        if total_errors:
+            summary = err(f"{SYM['err']} {total_errors} error(s)")
+            if total_warnings:
+                summary += "  " + warn(f"{SYM['warn']} {total_warnings} warning(s)")
+        elif total_warnings:
+            summary = warn(f"{SYM['warn']} {total_warnings} warning(s)")
+        else:
+            summary = ok(f"{SYM['ok']} all clean")
+        print(f"{bold(summary)}  "
+              f"{dim(f'{languages_checked} language file(s) checked')}")
 
     if total_errors:
         return 1
@@ -162,12 +175,15 @@ def cmd_translate(args: argparse.Namespace) -> int:
         or os.environ.get("OPENAI_API_KEY")
     model = args.model or os.environ.get("MODLANG_MODEL")
 
-    sets = _load_sets(args.path)
+    sets = _load_sets(args.path, args.exclude)
     rc = 0
-    for langset in sets:
+    for index, langset in enumerate(sets):
+        if index:
+            print()
+        print(ui.header(langset.namespace, langset.origin))
         source_code = _pick_source(langset, args.source)
         if source_code is None:
-            print(f"{bold(langset.namespace)}: {red('skip')} - source {args.source!r} not found")
+            print(f"  {err(SYM['err'] + ' skip:')} source {args.source!r} not found")
             rc = 1
             continue
         source_file = langset.files[source_code]
@@ -177,25 +193,25 @@ def cmd_translate(args: argparse.Namespace) -> int:
                 if k not in existing and k not in source_file.rich}
         rich_skipped = sum(1 for k in source_file.rich if k not in existing)
 
-        print(f"{bold(langset.namespace)}  {dim(langset.origin)}")
         if rich_skipped:
-            print(f"  {yellow(f'{rich_skipped} rich-text key(s) skipped')} "
+            note = f"{SYM['warn']} {rich_skipped} rich-text key(s) skipped"
+            print(f"  {warn(note)} "
                   f"{dim('(NeoForge text components must be translated by hand)')}")
         if not todo:
-            print(f"  {green('nothing to translate')} - {args.lang} already has all "
-                  f"{len(source_file.entries)} keys")
+            print(f"  {ok(SYM['ok'] + ' nothing to translate')} {dim('-')} {args.lang} "
+                  f"already has all {len(source_file.entries)} keys")
             continue
-        print(f"  {len(todo)} key(s) missing in {args.lang}")
+        print(f"  {accent(str(len(todo)))} key(s) missing in {bold(args.lang)}")
 
         if args.dry_run:
             for key, value in list(todo.items())[:20]:
-                print(f"    {key} = {value!r}")
+                print(f"    {dim(SYM['dot'])} {key} {dim('=')} {value!r}")
             if len(todo) > 20:
-                print(dim(f"    ... {len(todo) - 20} more"))
+                print(dim(f"    {SYM['dot']} ... {len(todo) - 20} more"))
             continue
 
         if source_file.path is None:
-            print(f"  {red('error:')} cannot write into a jar - extract it first")
+            print(f"  {err(SYM['err'] + ' error:')} cannot write into a jar - extract it first")
             rc = 1
             continue
         if not (api_base and api_key and model):
@@ -203,7 +219,12 @@ def cmd_translate(args: argparse.Namespace) -> int:
                      "(or set MODLANG_API_BASE / MODLANG_API_KEY / MODLANG_MODEL)")
 
         def progress(done: int, total: int) -> None:
-            print(f"  translating... {done}/{total}", flush=True)
+            if sys.stdout.isatty():
+                end = "\n" if done >= total else ""
+                print(f"\r  translating {ui.progress_bar(done / total)} {done}/{total} ",
+                      end=end, flush=True)
+            else:
+                print(f"  translating... {done}/{total}", flush=True)
 
         try:
             result = translate_entries(
@@ -230,10 +251,10 @@ def cmd_translate(args: argparse.Namespace) -> int:
         target_rich = target_file.rich if target_file else {}
         out_path.write_text(dump_entries(merged, source_file.fmt, rich=target_rich),
                             encoding="utf-8")
-        print(f"  {green('wrote')} {out_path}  "
-              f"(+{len(result.translated)} translated, {len(result.failed)} failed)")
+        print(f"  {ok(SYM['ok'] + ' wrote')} {out_path}  "
+              f"{dim(f'+{len(result.translated)} translated, {len(result.failed)} failed')}")
         for key, reason in result.failed.items():
-            print(f"    {yellow('failed:')} {key}  {dim(reason)}")
+            print(f"    {warn(SYM['warn'] + ' failed:')} {key}  {dim(reason)}")
         if result.failed:
             rc = 1
     return rc
@@ -249,14 +270,21 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--version", action="version", version=f"modlang {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_list = sub.add_parser("list", help="list language files found in a path or jar")
-    p_list.add_argument("path", nargs="?", default=".")
+    def common_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("path", nargs="?", default=".",
+                       help="resources directory, mod jar, or single lang file")
+        p.add_argument("--exclude", action="append", default=[], metavar="PATTERN",
+                       help="skip directories matching this glob (repeatable), "
+                            "e.g. --exclude 'epicfight*'")
+        p.add_argument("--source", default="en_us",
+                       help="source language (default: en_us)")
+
+    p_list = sub.add_parser("list", help="list language files with coverage bars")
+    common_args(p_list)
     p_list.set_defaults(func=cmd_list)
 
     p_check = sub.add_parser("check", help="check translations against the source language")
-    p_check.add_argument("path", nargs="?", default=".",
-                         help="resources directory, mod jar, or single lang file")
-    p_check.add_argument("--source", default="en_us", help="source language (default: en_us)")
+    common_args(p_check)
     p_check.add_argument("--lang", action="append",
                          help="target language(s) to check (default: all found)")
     p_check.add_argument("--json", action="store_true", help="machine-readable output")
@@ -268,9 +296,8 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     p_tr = sub.add_parser("translate",
                           help="fill missing keys using an OpenAI-compatible API")
-    p_tr.add_argument("path", nargs="?", default=".")
+    common_args(p_tr)
     p_tr.add_argument("--lang", required=True, help="target language, e.g. zh_cn")
-    p_tr.add_argument("--source", default="en_us")
     p_tr.add_argument("--api-base", help="e.g. https://api.openai.com/v1 "
                                          "(env: MODLANG_API_BASE / OPENAI_BASE_URL)")
     p_tr.add_argument("--api-key", help="env: MODLANG_API_KEY / OPENAI_API_KEY")

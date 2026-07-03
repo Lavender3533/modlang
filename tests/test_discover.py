@@ -76,3 +76,22 @@ def test_discover_skips_build_and_hidden_dirs(tmp_path):
     # explicitly pointing INTO an excluded dir still works
     inside = discover(tmp_path / "build" / "sourcesSets" / "main")
     assert len(inside) == 1
+
+
+def test_discover_custom_excludes(tmp_path):
+    src = tmp_path / "src" / "main" / "resources"
+    src.mkdir(parents=True)
+    make_tree(src)
+    vendor = tmp_path / "epicfight-1.21.1" / "common" / "src" / "main" / "resources"
+    vendor.mkdir(parents=True)
+    make_tree(vendor, namespace="epicfight")
+
+    both = discover(tmp_path)
+    assert {s.namespace for s in both} == {"mymod", "epicfight"}
+
+    filtered = discover(tmp_path, excludes=["epicfight*"])
+    assert {s.namespace for s in filtered} == {"mymod"}
+
+    # glob against the relative path also works
+    filtered2 = discover(tmp_path, excludes=["epicfight-1.21.1/*"])
+    assert {s.namespace for s in filtered2} == {"mymod"}

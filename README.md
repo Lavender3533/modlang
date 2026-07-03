@@ -73,13 +73,36 @@ mangled a placeholder is rejected and reported instead of written.
 - run: modlang check ./src/main/resources --lang zh_cn
 ```
 
+### Coverage at a glance
+
+`modlang list` shows a colored coverage bar per language, measured against the
+source file (not just raw key counts — stale keys don't inflate the score):
+
+```
+▍ epicfight  epicfight-1.21.1\common\src\main\resources\assets\epicfight\lang
+  en_us      661 keys  (source, json)
+  ja_jp    ████████████░░░░░░░░  60%  396/661 · json
+  zh_cn    ████████████░░░░░░░░  62%  407/661 · json
+
+▍ combat_arts  src\main\resources\assets\combat_arts\lang
+  en_us       58 keys  (source, json)
+  zh_cn    ████████████████████ 100%  58/58 · json
+```
+
+Output honors `NO_COLOR` / `FORCE_COLOR` and falls back to ASCII on
+non-UTF-8 terminals. No Nerd Font required.
+
 ### All commands
 
 | Command | What it does |
 |---|---|
-| `modlang list [PATH]` | list every language file found, with key counts |
+| `modlang list [PATH]` | list every language file found, with coverage bars |
 | `modlang check [PATH]` | compare translations against `--source` (default `en_us`) |
 | `modlang translate [PATH] --lang CODE` | fill missing keys via an LLM |
+
+All commands accept `--exclude PATTERN` (repeatable glob) to skip vendored
+sources or reference code, e.g. `modlang list --exclude 'epicfight*'`.
+Build outputs and hidden directories are always skipped automatically.
 
 ---
 
@@ -110,6 +133,18 @@ modlang check . --lang zh_cn                # 只检查中文
 
 有错误（缺失/空值/占位符不匹配）时退出码为 `1`，可以直接接进 CI。
 `--strict` 把警告也算作失败；`--json` 输出机器可读结果；`-v` 显示全部问题键。
+
+### 翻译覆盖率一目了然
+
+`modlang list` 会按源语言计算每个语言文件的**覆盖率进度条**（绿≥95%、黄≥70%、红<70%），
+过时的孤儿键不会虚增分数。项目里 vendor 了别人 mod 的源码（比如参考用的 Epic Fight）？
+用 `--exclude` 跳过：
+
+```bash
+modlang list --exclude "epicfight*"
+```
+
+输出支持 `NO_COLOR` / `FORCE_COLOR`，非 UTF-8 终端自动降级 ASCII，不需要 Nerd Font。
 
 ### 自动补翻缺失条目
 
