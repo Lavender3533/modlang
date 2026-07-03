@@ -12,6 +12,18 @@ from .parser import LangParseError, format_of, parse_bytes, parse_file
 
 JAR_LANG_RE = re.compile(r"^assets/([^/]+)/lang/([^/]+\.(?:json|lang))$")
 
+# Directory names never worth scanning: build outputs, caches, VCS/tool state.
+# Hidden directories (leading ".") are skipped too, e.g. .git, .gradle,
+# .claude/worktrees. Only applies below the scan root, so explicitly passing
+# a path inside one of these still works.
+EXCLUDED_DIRS = {"build", "out", "bin", "run", "target",
+                 "node_modules", "__pycache__"}
+
+
+def _is_excluded(root: Path, lang_dir: Path) -> bool:
+    parts = lang_dir.relative_to(root).parts
+    return any(part in EXCLUDED_DIRS or part.startswith(".") for part in parts)
+
 
 @dataclass
 class LangFile:
@@ -73,7 +85,7 @@ def discover_jar(jar_path: Path) -> List[LangSet]:
 def discover_dir(root: Path) -> List[LangSet]:
     sets: List[LangSet] = []
     lang_dirs = sorted(
-        (d for d in root.rglob("lang") if d.is_dir()),
+        (d for d in root.rglob("lang") if d.is_dir() and not _is_excluded(root, d)),
         key=lambda d: str(d),
     )
     # `root` itself may be a lang directory (e.g. `modlang check assets/mymod/lang`)

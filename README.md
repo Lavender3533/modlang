@@ -15,8 +15,8 @@
 Keeping `zh_cn.json` in sync with `en_us.json` by hand is miserable. **modlang** does it for you:
 
 - **Check** translations against the source language: missing keys, empty values, keys left untranslated, extra/orphaned keys, and **Java format placeholder mismatches** (`%s`, `%1$s`, `%.1f`) that crash the game at runtime.
-- **Scan anything**: a `src/main/resources` folder, an extracted resource pack, a single lang file — or a **mod jar directly**, no unzipping needed.
-- **Both formats**: modern `.json` (1.13+) and legacy `.lang` (≤1.12).
+- **Scan anything**: a `src/main/resources` folder, an extracted resource pack, a single lang file — or a **mod jar directly**, no unzipping needed. Build outputs and hidden folders (`build/`, `target/`, `run/`, `.git`, `.gradle`...) are skipped automatically.
+- **Both formats**: modern `.json` (1.13+) and legacy `.lang` (≤1.12), including NeoForge rich-text component values.
 - **Auto-translate** missing keys through any **OpenAI-compatible API** (OpenAI, DeepSeek, Ollama, one-api/new-api gateways...), with placeholder and `§` formatting-code protection built in.
 - **Zero dependencies.** Pure Python standard library. `pip install` and go.
 - **CI-friendly**: `--json` output and meaningful exit codes.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modlang"
-version = "0.1.1"
+version = "0.1.2"
 description = "Lint, diff and auto-translate Minecraft mod language files (.json / legacy .lang), straight from a resources folder or a mod jar."
 readme = "README.md"
 license = { text = "MIT" }

@@ -55,3 +55,24 @@ def test_discover_reports_parse_errors(tmp_path):
     sets = discover(tmp_path)
     assert len(sets[0].parse_errors) == 1
     assert "ja_jp" in sets[0].parse_errors[0]
+
+
+def test_discover_skips_build_and_hidden_dirs(tmp_path):
+    # the real source tree...
+    src = tmp_path / "src" / "main" / "resources"
+    src.mkdir(parents=True)
+    make_tree(src)
+    # ...plus copies in places nobody wants scanned
+    for junk in ("build/sourcesSets/main", ".claude/worktrees/foo/src/main/resources",
+                 "run/resourcepacks/pack", "target/classes"):
+        junk_root = tmp_path.joinpath(*junk.split("/"))
+        junk_root.mkdir(parents=True)
+        make_tree(junk_root)
+
+    sets = discover(tmp_path)
+    assert len(sets) == 1
+    assert "src" in sets[0].origin
+
+    # explicitly pointing INTO an excluded dir still works
+    inside = discover(tmp_path / "build" / "sourcesSets" / "main")
+    assert len(inside) == 1
